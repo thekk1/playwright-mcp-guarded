@@ -63,6 +63,17 @@ docker run --rm -p 8080:8080 \
 itself uses for `PLAYWRIGHT_MCP_ALLOWED_ORIGINS`. An empty value blocks
 every domain (logged as a warning at startup, not a silent bypass).
 
+`EXTRA_INSTRUCTIONS` (optional, free text) is appended verbatim to the
+`initialize` `instructions` the model sees. The allowlist only says *which*
+domains are reachable, not *how* to use what's behind them — e.g. a
+self-hosted search engine's query syntax. Deliberately not hardcoded here:
+this wrapper stays domain-agnostic, and the deployer supplies whatever
+operating knowledge their specific allowlist needs, in their own words:
+
+```
+-e EXTRA_INSTRUCTIONS="Search: http://searxng:8080/search?q=<term> (general), add &categories=science for Google Scholar results."
+```
+
 No `MCP_API_KEY`, no auth gate on the MCP connection itself — deliberately,
 same reasoning as `ews-mcp`/`time-mcp-http`: a 401 from any gate makes
 LibreChat's non-OAuth MCP client try (and get stuck on) OAuth. Docker

@@ -65,10 +65,19 @@ _UPSTREAM_URL = f"http://localhost:{INTERNAL_PORT}/mcp"
 
 _DOMAIN_LIST_HUMAN = ", ".join(_ALLOWED_ORIGINS) if _ALLOWED_ORIGINS else "(keine -- ALLOWED_ORIGINS ist leer, jede Domain wird geblockt)"
 
+# Free-text, deployment-specific operating knowledge (e.g. "this domain is
+# a self-hosted SearXNG, use ?categories=science for Google Scholar
+# results") -- kept out of this module on purpose. The domain allowlist is
+# generic and enforced; how to actually use what's behind a given domain
+# is deployment knowledge this wrapper has no business hardcoding. Appended
+# verbatim, so the deployer's wording is what the model sees.
+_EXTRA_INSTRUCTIONS = os.environ.get("EXTRA_INSTRUCTIONS", "").strip()
+
 _INSTRUCTIONS = (
     "Dieser Browser-MCP kann ausschliesslich folgende Domains erreichen "
     f"(serverseitig erzwungen, alles andere schlaegt fehl): {_DOMAIN_LIST_HUMAN}. "
     "Plane Aufrufe entsprechend, statt andere Domains zu versuchen."
+    + (f"\n\n{_EXTRA_INSTRUCTIONS}" if _EXTRA_INSTRUCTIONS else "")
 )
 
 _TOOL_NOTE = f"\n\nErlaubte Domains (serverseitig erzwungen): {_DOMAIN_LIST_HUMAN}."

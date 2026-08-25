@@ -47,6 +47,25 @@ def test_instructions_list_all_configured_domains(app_module):
         assert domain in app_module._INSTRUCTIONS
 
 
+def test_extra_instructions_appended_when_set(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "github.com")
+    monkeypatch.setenv("EXTRA_INSTRUCTIONS", "Use ?foo=bar for the frobnicator.")
+    from guardian import app as module
+
+    importlib.reload(module)
+    try:
+        assert "Use ?foo=bar for the frobnicator." in module._INSTRUCTIONS
+        assert "github.com" in module._INSTRUCTIONS
+    finally:
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        monkeypatch.delenv("EXTRA_INSTRUCTIONS", raising=False)
+        importlib.reload(module)
+
+
+def test_extra_instructions_absent_when_unset(app_module):
+    assert app_module._INSTRUCTIONS.count("\n\n") == 0
+
+
 def test_empty_allowlist_says_so_instead_of_silently_allowing(monkeypatch):
     monkeypatch.setenv("ALLOWED_ORIGINS", "")
     from guardian import app as module
