@@ -4,9 +4,10 @@ A domain-guarded, non-user-bound wrapper around Microsoft's
 [playwright-mcp](https://github.com/microsoft/playwright-mcp) — a general
 web-fetch/browse replacement for LibreChat assistants (GitHub, Wikipedia,
 Google, Google Scholar, ...), scoped to an allowlist of domains, extensible
-by editing one environment variable. See `bos-chat-stack.md` #20 for how
-this fits the rest of the (all-Docker, all-HTTP, non-user-bound) BOS MCP
-fleet — same family as `time-mcp-http` and `ews-mcp`'s multi-user mode.
+by editing one environment variable. Deployed as a plain streamable-HTTP
+Docker service (no `ports:` exposed, no per-user OAuth) alongside sibling
+projects [`time-mcp-http`](https://github.com/thekk1/time-mcp-http) and
+`ews-mcp`'s multi-user mode, which follow the same shape.
 
 ## Why not just run `@playwright/mcp` directly
 

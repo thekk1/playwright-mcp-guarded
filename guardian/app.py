@@ -12,7 +12,7 @@ a second system (no proxy container, no firewall config to keep in sync):
 2. The allowlist never appears in any tool description or the initialize
    `instructions`, so a model has no way to know upfront which domains
    are reachable -- it just fails, repeatedly, one blocked domain at a
-   time (see bos-chat-stack.md #20 "Tool-Schleifen").
+   time, instead of planning around a known-reachable set.
 
 This module spawns the actual `@playwright/mcp` CLI (upstream, unmodified,
 brings its own browser/context handling) as a child process listening on
@@ -130,10 +130,10 @@ class _MCPEndpoint:
     """Class instance, not a function -- Starlette only treats instances as
     raw ASGI (see Route.__init__); a function gets wrapped as
     func(request)->Response and, if mounted by prefix, 307-redirects a bare
-    path. That redirect broke time-mcp-http live: LibreChat's MCP client
-    blocks redirects to private/reserved addresses as SSRF hardening, and
-    every Docker-internal MCP address in this stack qualifies. Route with a
-    class-instance endpoint never redirects. See bos-chat-stack.md #18.4.
+    path. That redirect broke a companion project (time-mcp-http) live:
+    LibreChat's MCP client blocks redirects to private/reserved addresses
+    as SSRF hardening, and any Docker-internal MCP address qualifies.
+    Route with a class-instance endpoint never redirects.
 
     The session manager isn't available until the lifespan has finished
     connecting to the spawned upstream process (an async step) -- but the
