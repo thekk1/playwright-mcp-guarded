@@ -5,9 +5,9 @@ A domain-guarded, non-user-bound wrapper around Microsoft's
 web-fetch/browse replacement for LibreChat assistants (GitHub, Wikipedia,
 Google, Google Scholar, ...), scoped to an allowlist of domains, extensible
 by editing one environment variable. Deployed as a plain streamable-HTTP
-Docker service (no `ports:` exposed, no per-user OAuth) alongside sibling
-projects [`time-mcp-http`](https://github.com/thekk1/time-mcp-http) and
-`ews-mcp`'s multi-user mode, which follow the same shape.
+Docker service (no `ports:` exposed, no per-user OAuth). See also
+[`time-mcp-http`](https://github.com/thekk1/time-mcp-http), a sibling
+project with the same deployment shape.
 
 ## Why not just run `@playwright/mcp` directly
 
@@ -74,11 +74,11 @@ operating knowledge their specific allowlist needs, in their own words:
 -e EXTRA_INSTRUCTIONS="Search: http://searxng:8080/search?q=<term> (general), add &categories=science for Google Scholar results."
 ```
 
-No `MCP_API_KEY`, no auth gate on the MCP connection itself — deliberately,
-same reasoning as `ews-mcp`/`time-mcp-http`: a 401 from any gate makes
-LibreChat's non-OAuth MCP client try (and get stuck on) OAuth. Docker
-network isolation is the boundary. No credentials of any kind pass through
-this server; it only ever reads public pages.
+No `MCP_API_KEY`, no auth gate on the MCP connection itself — deliberately:
+a 401 from any such gate makes LibreChat's non-OAuth MCP client try (and
+get stuck on) OAuth. Docker network isolation is the boundary. No
+credentials of any kind pass through this server; it only ever reads
+public pages.
 
 **Accepted trade-off, not an oversight:** this keeps enforcement at the
 Playwright application layer (now with `--block-service-workers`), not an

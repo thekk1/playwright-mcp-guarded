@@ -26,10 +26,10 @@ single source of truth -- read once, handed to both the upstream process
 (visibility only, not enforcement) -- so extending it later is a one-line
 env var change, not two configs to keep in sync.
 
-No MCP_API_KEY, no auth gate: same reasoning as ews-mcp/time-mcp-http (a
-401 from any gate makes LibreChat's non-OAuth MCP client try and get stuck
-on OAuth). Docker network isolation is the boundary. No credentials of any
-kind flow through here -- this only ever reads public pages.
+No MCP_API_KEY, no auth gate: a 401 from any gate makes LibreChat's
+non-OAuth MCP client try and get stuck on OAuth. Docker network isolation
+is the boundary. No credentials of any kind flow through here -- this only
+ever reads public pages.
 """
 
 from __future__ import annotations
