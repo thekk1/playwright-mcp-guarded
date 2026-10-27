@@ -32,7 +32,7 @@ def _tool(name: str, description: str, properties: dict) -> types.Tool:
 
 
 def test_tool_with_url_param_gets_domain_note_appended(app_module):
-    tool = _tool("browser_navigate", "Navigate to a URL", {"url": {"type": "string"}})
+    tool = _tool("browser_tabs", "Navigate to a URL", {"url": {"type": "string"}})
     annotated = app_module._annotate_tool(tool)
     assert "github.com" in annotated.description
     assert "raw.githubusercontent.com" in annotated.description
@@ -282,3 +282,10 @@ def test_browser_read_listed_with_domain_note(app_module):
     tools = anyio.run(run)
     assert tools[0].name == "browser_read"
     assert "github.com" in tools[0].description
+
+
+def test_navigate_description_points_to_browser_read(app_module):
+    tool = _tool("browser_navigate", "Navigate to a URL", {"url": {"type": "string"}})
+    annotated = app_module._annotate_tool(tool)
+    assert annotated.description.startswith(app_module._NAVIGATE_NOTE + "Navigate to a URL")
+    assert "github.com" in annotated.description

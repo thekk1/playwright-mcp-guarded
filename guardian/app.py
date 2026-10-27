@@ -254,6 +254,17 @@ _READ_TOOL = types.Tool(
     },
 )
 
+# Prepended to browser_navigate's own description ("Navigate to a URL").
+# The usage note in the instructions alone wasn't enough: models still
+# called browser_navigate first and browser_read without url right after --
+# two model turns per page instead of one. The description of the tool
+# being picked is what steers that choice.
+_NAVIGATE_NOTE = (
+    "Opens the URL without returning page content. To read a page, call browser_read with "
+    "`url` instead (one call instead of two); use browser_navigate only before clicking or "
+    "filling in. "
+)
+
 _SECTION = re.compile(r"^### ", re.MULTILINE)
 
 
@@ -320,7 +331,8 @@ def _annotate_tool(tool: types.Tool) -> types.Tool:
                if "required" in schema else {}),
         }
     if "url" in props:
-        update["description"] = (tool.description or "") + _TOOL_NOTE
+        prefix = _NAVIGATE_NOTE if tool.name == "browser_navigate" else ""
+        update["description"] = prefix + (tool.description or "") + _TOOL_NOTE
     return tool.model_copy(update=update) if update else tool
 
 

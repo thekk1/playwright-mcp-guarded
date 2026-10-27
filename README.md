@@ -111,6 +111,11 @@ unchanged. Navigation, forms, selects and similar chrome are hidden while
 reading; links to other hosts carry their URL as `<url>`, same-host links
 don't. Long pages come in sections of 30000 characters, `offset` continues.
 
+`browser_navigate`'s description is prefixed with a note that it returns
+no content and that reading goes through `browser_read` with `url`. With the
+instructions alone, models still called `browser_navigate` first and
+`browser_read` without `url` right after.
+
 Why: with navigate + snapshot every page costs two calls, each a full model
 turn, and the accessibility tree is several times the size of the text
 (German Wikipedia article on Nike: 125849 characters as snapshot, 27597 via
