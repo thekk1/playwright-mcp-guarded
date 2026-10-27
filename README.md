@@ -72,6 +72,13 @@ mcpServers:
       X-LibreChat-User: "{{LIBRECHAT_USER_ID}}"
 ```
 
+LibreChat never passes `initialize` `instructions` of such a per-user
+server to the model (it only reads them in its startup inspection, which
+skips per-user servers). The guardian therefore appends the complete
+instructions — domain list, `browser_snapshot` hint, `EXTRA_INSTRUCTIONS`
+— to every tool that takes a `url` (`browser_navigate`, `browser_tabs`);
+tool descriptions arrive per connection.
+
 Requests without the header share one fallback session (logged as a
 warning). A session idle for `SESSION_IDLE_SECONDS` (default 900) is
 closed, and with it that user's browser context; `browser_close` closes it
@@ -108,7 +115,8 @@ itself uses for `PLAYWRIGHT_MCP_ALLOWED_ORIGINS`. An empty value blocks
 every domain (logged as a warning at startup, not a silent bypass).
 
 `EXTRA_INSTRUCTIONS` (optional, free text) is appended verbatim to the
-`initialize` `instructions` the model sees. The allowlist only says *which*
+`initialize` `instructions` the model sees, and with them to the
+description of every tool that takes a `url`. The allowlist only says *which*
 domains are reachable, not *how* to use what's behind them — e.g. a
 self-hosted search engine's query syntax. Deliberately not hardcoded here:
 this wrapper stays domain-agnostic, and the deployer supplies whatever

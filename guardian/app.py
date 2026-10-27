@@ -135,7 +135,12 @@ _INSTRUCTIONS = (
     + (f"\n\n{_EXTRA_INSTRUCTIONS}" if _EXTRA_INSTRUCTIONS else "")
 )
 
-_TOOL_NOTE = f"\n\nErlaubte Domains (serverseitig erzwungen): {_DOMAIN_LIST_HUMAN}."
+# The full instructions, not just the domain list: a client that connects
+# per user may never show `initialize` instructions to the model. LibreChat
+# only takes them from its startup inspection, which skips servers with
+# per-user headers (see _SESSION_HEADER). Tool descriptions arrive per
+# connection, so this is the copy every model sees.
+_TOOL_NOTE = f"\n\n{_INSTRUCTIONS}"
 
 
 def _spawn_upstream() -> subprocess.Popen:

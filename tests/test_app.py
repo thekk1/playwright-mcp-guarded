@@ -38,6 +38,7 @@ def test_tool_with_url_param_gets_domain_note_appended(app_module):
     assert "raw.githubusercontent.com" in annotated.description
     assert "wikipedia.org" in annotated.description
     assert annotated.description.startswith("Navigate to a URL")
+    assert "browser_snapshot" in annotated.description
 
 
 def test_tool_without_url_param_is_untouched(app_module):
