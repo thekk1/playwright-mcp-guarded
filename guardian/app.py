@@ -374,6 +374,18 @@ class _UpstreamPool:
         self._tg = task_group
         self._slots: dict[str, _Slot] = {}
         self._lock = anyio.Lock()
+        self._user_locks: dict[str, anyio.Lock] = {}
+
+    def user_lock(self, key: str) -> anyio.Lock:
+        """Serializes one user's tool calls. Models issue several tool calls
+        of one turn in parallel; they all act on the same page of that
+        user's context, and a second navigation aborts the first
+        (net::ERR_ABORTED). One lock per user key, kept for the process
+        lifetime -- a handful of bytes per user."""
+        lock = self._user_locks.get(key)
+        if lock is None:
+            lock = self._user_locks[key] = anyio.Lock()
+        return lock
 
     async def _run(self, key: str, slot: _Slot) -> None:
         try:
@@ -474,9 +486,11 @@ def build_server(tools: list[types.Tool], pool: _UpstreamPool) -> Server:
                 content=[types.TextContent(type="text", text=f"Werkzeug {name} ist gesperrt.")],
                 isError=True,
             )
-        if name == _READ_TOOL.name:
-            return await _read_page(pool, _session_key(server), arguments or {})
-        result = await pool.call_tool(_session_key(server), name, _strip_file_args(arguments))
+        key = _session_key(server)
+        async with pool.user_lock(key):
+            if name == _READ_TOOL.name:
+                return await _read_page(pool, key, arguments or {})
+            result = await pool.call_tool(key, name, _strip_file_args(arguments))
         return _replace_file_links(result)
 
     return server

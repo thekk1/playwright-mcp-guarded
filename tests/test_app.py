@@ -289,3 +289,13 @@ def test_navigate_description_points_to_browser_read(app_module):
     annotated = app_module._annotate_tool(tool)
     assert annotated.description.startswith(app_module._NAVIGATE_NOTE + "Navigate to a URL")
     assert "github.com" in annotated.description
+
+
+@pytest.mark.anyio
+async def test_user_lock_is_per_user(app_module):
+    import anyio
+
+    async with anyio.create_task_group() as tg:
+        pool = app_module._UpstreamPool(tg)
+        assert pool.user_lock("a") is pool.user_lock("a")
+        assert pool.user_lock("a") is not pool.user_lock("b")

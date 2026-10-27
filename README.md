@@ -79,6 +79,10 @@ instructions — domain list, `browser_snapshot` hint, `EXTRA_INSTRUCTIONS`
 — to every tool that takes a `url` (`browser_navigate`, `browser_tabs`);
 tool descriptions arrive per connection.
 
+Tool calls of one user run one after another. Models issue several tool
+calls of one turn in parallel; they all act on the same page of that user's
+context, and a second navigation aborts the first (`net::ERR_ABORTED`).
+
 Requests without the header share one fallback session (logged as a
 warning). A session idle for `SESSION_IDLE_SECONDS` (default 900) is
 closed, and with it that user's browser context; `browser_close` closes it
