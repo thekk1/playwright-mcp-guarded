@@ -101,6 +101,15 @@ that upstream writes to a file is a dead end:
 - `--output-dir /tmp/playwright-mcp-output` (capped at 50 MB): screenshot
   files still land there, the working directory isn't writable.
 
+### Blocked tools
+
+`browser_run_code_unsafe` is hidden from `tools/list` and refused in
+`tools/call`. It runs model-supplied code in the upstream Node process
+(`node:vm`, no sandbox; upstream's own description calls it
+RCE-equivalent), so a prompt injection from any visited page could execute
+code in the container and reach the network past the domain allowlist.
+Upstream counts it as a `core` tool and has no option to drop it.
+
 ## Run
 
 ```

@@ -187,3 +187,35 @@ async def test_pool_keeps_one_session_per_user_and_closes_idle(app_module, monke
         await anyio.sleep(0.2)
         assert pool._slots == {}
         tg.cancel_scope.cancel()
+
+
+def test_unsafe_code_tool_hidden_and_refused(app_module):
+    import anyio
+
+    tools = [
+        _tool("browser_run_code_unsafe", "Run code", {"code": {"type": "string"}}),
+        _tool("browser_snapshot", "Snapshot", {}),
+    ]
+
+    class _NoPool:
+        async def call_tool(self, *args):
+            raise AssertionError("blocked tool reached upstream")
+
+    server = app_module.build_server(tools, _NoPool())
+
+    async def run():
+        listed = await server.request_handlers[types.ListToolsRequest](
+            types.ListToolsRequest(method="tools/list")
+        )
+        names = [t.name for t in listed.root.tools]
+        called = await server.request_handlers[types.CallToolRequest](
+            types.CallToolRequest(
+                method="tools/call",
+                params=types.CallToolRequestParams(name="browser_run_code_unsafe", arguments={"code": "1"}),
+            )
+        )
+        return names, called.root
+
+    names, called = anyio.run(run)
+    assert names == ["browser_snapshot"]
+    assert called.isError

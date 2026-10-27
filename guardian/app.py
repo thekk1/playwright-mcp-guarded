@@ -110,6 +110,15 @@ _OUTPUT_MAX_SIZE = 50 * 1024 * 1024
 # tools/call, so results always come back inline.
 _FILE_ARGS = ("filename",)
 
+# Tools never exposed. browser_run_code_unsafe runs model-supplied code in
+# the upstream Node process (node:vm, no sandbox) -- upstream itself calls
+# it RCE-equivalent: one prompt injection from a visited page away from
+# code execution in this container and network access past the domain
+# allowlist. It belongs to the "core" capability, upstream has no switch to
+# drop it. Hidden from tools/list and refused in tools/call; the guardian is
+# the only way in (upstream listens on loopback only).
+_BLOCKED_TOOLS = frozenset({"browser_run_code_unsafe"})
+
 # Upstream writes new console messages to a log file and puts a link into
 # every response ("- New console entries: ../tmp/.../console-*.log#L1-L8");
 # there's no option to turn that off. Same dead end as _FILE_ARGS, so the
@@ -312,7 +321,7 @@ def _session_key(server: Server) -> str:
 
 def build_server(tools: list[types.Tool], pool: _UpstreamPool) -> Server:
     server: Server = Server("playwright-mcp-guarded", instructions=_INSTRUCTIONS)
-    annotated = [_annotate_tool(t) for t in tools]
+    annotated = [_annotate_tool(t) for t in tools if t.name not in _BLOCKED_TOOLS]
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
@@ -325,6 +334,11 @@ def build_server(tools: list[types.Tool], pool: _UpstreamPool) -> Server:
     # without `scale`). Upstream validates every call itself anyway.
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict[str, Any]) -> types.CallToolResult:
+        if name in _BLOCKED_TOOLS:
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=f"Werkzeug {name} ist gesperrt.")],
+                isError=True,
+            )
         result = await pool.call_tool(_session_key(server), name, _strip_file_args(arguments))
         return _replace_file_links(result)
 
