@@ -44,8 +44,8 @@ LibreChat --(streamable-http, /mcp)--> guardian (Python, PID 1)
 child process bound to `localhost` only, connects to it as an MCP
 *client*, and re-exposes it as an MCP *server* on the container's public
 port: `tools/list` and `initialize` get the domain list appended for
-visibility, `tools/call` is forwarded with file arguments removed (see below) — no
-tool logic of its own. `ALLOWED_ORIGINS` is read
+visibility, `tools/call` is forwarded with file arguments removed (see below). One tool
+of its own, `browser_read`, is built from upstream tools. `ALLOWED_ORIGINS` is read
 once, at startup, and handed to both: the spawned process (as
 `--allowed-origins`, the actual enforcement) and the two response
 rewrites (visibility only). Extending the list later is a one-line change
@@ -91,8 +91,9 @@ that upstream writes to a file is a dead end:
 
 - `--snapshot-mode none`: navigate, click, type etc. return no snapshot
   (upstream would write it to a file and return only a link). The
-  `initialize` `instructions` tell the model to call `browser_snapshot`,
-  which returns the accessibility tree inline.
+  instructions tell the model to read with `browser_read` and to use
+  `browser_snapshot` (accessibility tree, inline) only for element
+  references.
 - The `filename` argument is removed from every tool schema and every
   `tools/call` (`browser_snapshot`, `browser_evaluate`,
   `browser_console_messages`, ...), so results come back in the response.
@@ -100,6 +101,21 @@ that upstream writes to a file is a dead end:
   by `browser_console_messages`.
 - `--output-dir /tmp/playwright-mcp-output` (capped at 50 MB): screenshot
   files still land there, the working directory isn't writable.
+
+### `browser_read`
+
+Navigates (optional `url`) and returns the rendered text of the main
+content in one call, via upstream `browser_navigate` and
+`browser_evaluate` in the user's own session — the allowlist applies
+unchanged. Navigation, forms, selects and similar chrome are hidden while
+reading; links to other hosts carry their URL as `<url>`, same-host links
+don't. Long pages come in sections of 30000 characters, `offset` continues.
+
+Why: with navigate + snapshot every page costs two calls, each a full model
+turn, and the accessibility tree is several times the size of the text
+(German Wikipedia article on Nike: 125849 characters as snapshot, 27597 via
+`browser_read`; a SearXNG result page: 32721 vs. 9959). Models then pick
+fragments with `browser_find` instead of reading the page.
 
 ### Blocked tools
 

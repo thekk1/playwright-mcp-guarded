@@ -21,7 +21,8 @@ re-exposes it as an MCP *server* on the container's public port: tools/list
 is passed through with the domain list appended to any tool description
 whose inputSchema takes a `url` argument, initialize's `instructions` gets
 the same list, and tools/call is forwarded with file arguments removed (see
-_FILE_ARGS). ALLOWED_ORIGINS is the
+_FILE_ARGS). One tool of its own, browser_read, combines upstream tools
+(see _READ_TOOL). ALLOWED_ORIGINS is the
 single source of truth -- read once, handed to both the upstream process
 (as --allowed-origins, real enforcement) and the two response rewrites
 (visibility only, not enforcement) -- so extending it later is a one-line
@@ -44,6 +45,7 @@ ever reads public pages.
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
 import re
@@ -128,18 +130,21 @@ _CONSOLE_LINK = re.compile(r"(- New console entries: )\S+")
 # --snapshot-mode none: page-changing tools (navigate, click, type, ...) no
 # longer return a snapshot. Upstream would write it to a file and return
 # only a link (see _FILE_ARGS for why that's useless here); with "none" the
-# response is just the page header, and browser_snapshot returns the
-# accessibility tree inline. The model needs to know that up front.
-_SNAPSHOT_NOTE = (
-    "\n\nSeitenwechsel und Aktionen (browser_navigate, browser_click, ...) liefern keinen "
-    "Seiteninhalt. Den Inhalt und die Element-Referenzen danach mit browser_snapshot abrufen."
+# response is just the page header. Reading goes through browser_read (see
+# _READ_TOOL), element references for clicks through browser_snapshot. The
+# model needs to know that up front.
+_USAGE_NOTE = (
+    "\n\nZum Lesen einer Seite browser_read verwenden: Es ruft die URL auf und liefert den Text "
+    "in einem Aufruf. browser_navigate, browser_click usw. liefern keinen Seiteninhalt; "
+    "browser_snapshot nur fuer Element-Referenzen verwenden, die zum Klicken oder Ausfuellen "
+    "gebraucht werden."
 )
 
 _INSTRUCTIONS = (
     "Dieser Browser-MCP kann ausschliesslich folgende Domains erreichen "
     f"(serverseitig erzwungen, alles andere schlaegt fehl): {_DOMAIN_LIST_HUMAN}. "
     "Plane Aufrufe entsprechend, statt andere Domains zu versuchen."
-    + _SNAPSHOT_NOTE
+    + _USAGE_NOTE
     + (f"\n\n{_EXTRA_INSTRUCTIONS}" if _EXTRA_INSTRUCTIONS else "")
 )
 
@@ -183,6 +188,124 @@ async def _wait_for_upstream(timeout_seconds: float = 30.0) -> None:
     with anyio.fail_after(timeout_seconds):
         while not await _probe():
             await anyio.sleep(0.3)
+
+
+# browser_read: one call that navigates and returns the readable text. With
+# only navigate + snapshot, every page costs two calls -- each a full model
+# turn over the whole context -- and the snapshot is an accessibility tree
+# several times the size of the text (a Wikipedia article: ~126k characters
+# as snapshot, ~23k as text). Models then fish for fragments with
+# browser_find instead of reading. Built from upstream's browser_navigate and
+# browser_evaluate in the user's own session, so the allowlist applies
+# unchanged.
+_READ_CHUNK = 30000
+
+# Main content as rendered text. Navigation, forms, selects and similar
+# chrome are hidden while reading (innerText skips hidden elements; a
+# select's options would otherwise all be listed -- SearXNG's language list
+# alone is several thousand characters). Links to other hosts get their URL
+# appended (search results need them to be followed); same-host links
+# don't -- Wikipedia articles have hundreds of internal links that would
+# bury the text. All changes are undone before returning.
+_READ_FUNCTION = """() => {
+  const root = document.querySelector('main, [role=main], article') || document.body;
+  const hidden = [];
+  for (const el of root.querySelectorAll('nav, aside, form, select, script, style, noscript, [role=navigation], [role=search], [role=banner], [role=contentinfo], [role=complementary], [aria-hidden=true]')) {
+    hidden.push([el, el.style.cssText]);
+    el.style.setProperty('display', 'none', 'important');
+  }
+  const added = [];
+  for (const a of root.querySelectorAll('a[href]')) {
+    let u;
+    try { u = new URL(a.href); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol) || u.host === location.host || !a.innerText.trim()) continue;
+    const span = document.createElement('span');
+    span.textContent = ' <' + u.href + '>';
+    a.after(span);
+    added.push(span);
+  }
+  const text = root.innerText;
+  for (const span of added) span.remove();
+  for (const [el, css] of hidden) el.style.cssText = css;
+  return {url: location.href, title: document.title, text};
+}"""
+
+_READ_TOOL = types.Tool(
+    name="browser_read",
+    title="Read page text",
+    description=(
+        "Read a web page as text in one call: navigates to `url` (or reads the current page if "
+        "`url` is omitted) and returns the readable text of the main content, with links to "
+        "other sites as <url>. Long pages come in sections of "
+        f"{_READ_CHUNK} characters; pass `offset` to continue. Use this to read pages; use "
+        "browser_snapshot only for element references needed to click or fill in."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "URL to open; omit to read the current page"},
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Character offset to start from, for the next section of a long page",
+            },
+        },
+        "additionalProperties": False,
+    },
+)
+
+_SECTION = re.compile(r"^### ", re.MULTILINE)
+
+
+def _section(result: types.CallToolResult, heading: str) -> str | None:
+    text = "\n".join(c.text for c in result.content if isinstance(c, types.TextContent))
+    marker = f"### {heading}\n"
+    start = text.find(marker)
+    if start < 0:
+        return None
+    body = text[start + len(marker):]
+    end = _SECTION.search(body)
+    return body[:end.start()] if end else body
+
+
+def _format_read(page: dict[str, Any], status: str | None, offset: int) -> str:
+    text = re.sub(r"[ \t]+\n", "\n", page.get("text") or "")
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    total = len(text)
+    offset = min(max(offset, 0), total)
+    end = min(offset + _READ_CHUNK, total)
+    lines = [
+        "### Page",
+        f"- Page URL: {page.get('url', '')}",
+        f"- Page Title: {page.get('title', '')}",
+    ]
+    if status:
+        lines.append(f"- HTTP status: {status}")
+    if offset >= total:
+        lines += ["### Text", f"Kein weiterer Text: die Seite hat {total} Zeichen."]
+        return "\n".join(lines)
+    lines += [f"### Text (Zeichen {offset}-{end} von {total})", text[offset:end]]
+    if end < total:
+        lines += ["### Weiterlesen", f"browser_read ohne url mit offset={end} liefert den naechsten Abschnitt."]
+    return "\n".join(lines)
+
+
+async def _read_page(pool: "_UpstreamPool", key: str, arguments: dict[str, Any]) -> types.CallToolResult:
+    status = None
+    if arguments.get("url"):
+        nav = await pool.call_tool(key, "browser_navigate", {"url": arguments["url"]})
+        if nav.isError:
+            return _replace_file_links(nav)
+        match = re.search(r"^- HTTP status: (.+)$", _section(nav, "Page") or "", re.MULTILINE)
+        status = match.group(1) if match else None
+    ev = await pool.call_tool(key, "browser_evaluate", {"function": _READ_FUNCTION})
+    raw = _section(ev, "Result")
+    if ev.isError or raw is None:
+        return _replace_file_links(ev)
+    page = json.loads(raw)
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=_format_read(page, status, int(arguments.get("offset") or 0)))],
+    )
 
 
 def _annotate_tool(tool: types.Tool) -> types.Tool:
@@ -321,7 +444,7 @@ def _session_key(server: Server) -> str:
 
 def build_server(tools: list[types.Tool], pool: _UpstreamPool) -> Server:
     server: Server = Server("playwright-mcp-guarded", instructions=_INSTRUCTIONS)
-    annotated = [_annotate_tool(t) for t in tools if t.name not in _BLOCKED_TOOLS]
+    annotated = [_annotate_tool(t) for t in [_READ_TOOL, *tools] if t.name not in _BLOCKED_TOOLS]
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
@@ -339,6 +462,8 @@ def build_server(tools: list[types.Tool], pool: _UpstreamPool) -> Server:
                 content=[types.TextContent(type="text", text=f"Werkzeug {name} ist gesperrt.")],
                 isError=True,
             )
+        if name == _READ_TOOL.name:
+            return await _read_page(pool, _session_key(server), arguments or {})
         result = await pool.call_tool(_session_key(server), name, _strip_file_args(arguments))
         return _replace_file_links(result)
 

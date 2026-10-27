@@ -38,7 +38,7 @@ def test_tool_with_url_param_gets_domain_note_appended(app_module):
     assert "raw.githubusercontent.com" in annotated.description
     assert "wikipedia.org" in annotated.description
     assert annotated.description.startswith("Navigate to a URL")
-    assert "browser_snapshot" in annotated.description
+    assert "browser_read" in annotated.description
 
 
 def test_tool_without_url_param_is_untouched(app_module):
@@ -101,11 +101,11 @@ def test_extra_instructions_appended_when_set(monkeypatch):
 
 
 def test_extra_instructions_absent_when_unset(app_module):
-    assert app_module._INSTRUCTIONS.endswith(app_module._SNAPSHOT_NOTE)
+    assert app_module._INSTRUCTIONS.endswith(app_module._USAGE_NOTE)
 
 
-def test_instructions_tell_model_to_fetch_content_with_snapshot(app_module):
-    assert "browser_snapshot" in app_module._INSTRUCTIONS
+def test_instructions_tell_model_to_read_with_browser_read(app_module):
+    assert "browser_read" in app_module._INSTRUCTIONS
 
 
 def test_empty_allowlist_says_so_instead_of_silently_allowing(monkeypatch):
@@ -217,5 +217,68 @@ def test_unsafe_code_tool_hidden_and_refused(app_module):
         return names, called.root
 
     names, called = anyio.run(run)
-    assert names == ["browser_snapshot"]
+    assert names == ["browser_read", "browser_snapshot"]
     assert called.isError
+
+
+def _result(text: str, is_error: bool = False):
+    return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=is_error)
+
+
+class _ScriptedPool:
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    async def call_tool(self, key, name, arguments):
+        self.calls.append((key, name, arguments))
+        return self.responses[name]
+
+
+def test_browser_read_navigates_and_returns_text_in_sections(app_module, monkeypatch):
+    import anyio
+    import json
+
+    monkeypatch.setattr(app_module, "_READ_CHUNK", 10)
+    page = {"url": "https://de.wikipedia.org/wiki/X", "title": "X", "text": "abcdefghij\n\n\n\nklmno  \n"}
+    pool = _ScriptedPool({
+        "browser_navigate": _result("### Ran Playwright code\n```js\n```\n### Page\n- Page URL: u\n- HTTP status: 404\n### Events\n- x"),
+        "browser_evaluate": _result("### Result\n" + json.dumps(page, indent=2) + "\n### Ran Playwright code\n```js\n```"),
+    })
+    out = anyio.run(app_module._read_page, pool, "k", {"url": "https://de.wikipedia.org/wiki/X"})
+    text = out.content[0].text
+    assert [c[1] for c in pool.calls] == ["browser_navigate", "browser_evaluate"]
+    assert "- HTTP status: 404" in text
+    assert "### Text (Zeichen 0-10 von 17)\nabcdefghij\n" in text
+    assert "offset=10" in text
+
+    out = anyio.run(app_module._read_page, pool, "k", {"offset": 10})
+    text = out.content[0].text
+    assert pool.calls[-1][1] == "browser_evaluate" and pool.calls[-2][1] == "browser_evaluate"
+    assert text.endswith("### Text (Zeichen 10-17 von 17)\n\n\nklmno")
+    assert "Weiterlesen" not in text
+
+    out = anyio.run(app_module._read_page, pool, "k", {"offset": 17})
+    assert out.content[0].text.endswith("Kein weiterer Text: die Seite hat 17 Zeichen.")
+
+
+def test_browser_read_passes_navigation_errors_through(app_module):
+    import anyio
+
+    pool = _ScriptedPool({"browser_navigate": _result("### Error\nnet::ERR_BLOCKED_BY_CLIENT", is_error=True)})
+    out = anyio.run(app_module._read_page, pool, "k", {"url": "https://example.com/"})
+    assert out.isError
+    assert [c[1] for c in pool.calls] == ["browser_navigate"]
+
+
+def test_browser_read_listed_with_domain_note(app_module):
+    server = app_module.build_server([], _ScriptedPool({}))
+    import anyio
+
+    async def run():
+        listed = await server.request_handlers[types.ListToolsRequest](types.ListToolsRequest(method="tools/list"))
+        return listed.root.tools
+
+    tools = anyio.run(run)
+    assert tools[0].name == "browser_read"
+    assert "github.com" in tools[0].description
