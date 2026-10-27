@@ -54,7 +54,6 @@ import anyio
 import anyio.abc
 import httpx
 from mcp import types
-from mcp.shared.exceptions import McpError
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from mcp.server.lowlevel import Server
@@ -274,10 +273,11 @@ class _UpstreamPool:
         slot = await self._acquire(key)
         try:
             result = await slot.session.call_tool(name, arguments)
-        except McpError:
-            raise
         except Exception:
-            # Transport-level failure: drop the session, the next call opens a new one.
+            # Tool failures come back as isError results, not exceptions. An
+            # exception means the session itself is broken -- typically
+            # McpError "Session terminated" after upstream dropped it. Drop
+            # it, the next call opens a new one.
             slot.closed.set()
             raise
         finally:
