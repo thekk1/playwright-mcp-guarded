@@ -1,11 +1,12 @@
 # playwright-mcp-guarded
 
-A domain-guarded, non-user-bound wrapper around Microsoft's
+A domain-guarded wrapper around Microsoft's
 [playwright-mcp](https://github.com/microsoft/playwright-mcp) — a general
 web-fetch/browse replacement for LibreChat assistants (GitHub, Wikipedia,
 Google, Google Scholar, ...), scoped to an allowlist of domains, extensible
 by editing one environment variable. Deployed as a plain streamable-HTTP
-Docker service (no `ports:` exposed, no per-user OAuth). See also
+Docker service (no `ports:` exposed, no per-user OAuth), with one isolated
+browser context per user. See also
 [`time-mcp-http`](https://github.com/thekk1/time-mcp-http), a sibling
 project with the same deployment shape.
 
@@ -43,12 +44,55 @@ LibreChat --(streamable-http, /mcp)--> guardian (Python, PID 1)
 child process bound to `localhost` only, connects to it as an MCP
 *client*, and re-exposes it as an MCP *server* on the container's public
 port: `tools/list` and `initialize` get the domain list appended for
-visibility, `tools/call` is forwarded verbatim — no tool logic of its own,
-no changed behavior beyond those two text edits. `ALLOWED_ORIGINS` is read
+visibility, `tools/call` is forwarded with file arguments removed (see below) — no
+tool logic of its own. `ALLOWED_ORIGINS` is read
 once, at startup, and handed to both: the spawned process (as
 `--allowed-origins`, the actual enforcement) and the two response
 rewrites (visibility only). Extending the list later is a one-line change
 to that single env var, not two configs to keep in sync.
+
+### One browser context per user
+
+The guardian opens one upstream MCP session per user, keyed by a request
+header (`SESSION_HEADER`, default `X-LibreChat-User`). Upstream runs with
+`--isolated`, so each session gets its own in-memory browser context in one
+shared Chromium: own tabs, own cookies, own page state. With a single shared
+session, every user would see every other user's open tabs in each tool
+response, and two concurrent users would steer the same page.
+
+LibreChat sets the header per user and, because of the placeholder, opens
+one MCP connection per user instead of one shared app connection:
+
+```yaml
+mcpServers:
+  browse:
+    type: streamable-http
+    url: http://playwright-mcp:8080/mcp
+    headers:
+      X-LibreChat-User: "{{LIBRECHAT_USER_ID}}"
+```
+
+Requests without the header share one fallback session (logged as a
+warning). A session idle for `SESSION_IDLE_SECONDS` (default 900) is
+closed, and with it that user's browser context; `browser_close` closes it
+right away. The next tool call opens a fresh one.
+
+### Results always inline
+
+The calling model can't read files inside this container, so any result
+that upstream writes to a file is a dead end:
+
+- `--snapshot-mode none`: navigate, click, type etc. return no snapshot
+  (upstream would write it to a file and return only a link). The
+  `initialize` `instructions` tell the model to call `browser_snapshot`,
+  which returns the accessibility tree inline.
+- The `filename` argument is removed from every tool schema and every
+  `tools/call` (`browser_snapshot`, `browser_evaluate`,
+  `browser_console_messages`, ...), so results come back in the response.
+- The console-log file link upstream adds to every response is replaced
+  by `browser_console_messages`.
+- `--output-dir /tmp/playwright-mcp-output` (capped at 50 MB): screenshot
+  files still land there, the working directory isn't writable.
 
 ## Run
 
@@ -105,8 +149,9 @@ pip install -e '.[dev]'
 ALLOWED_ORIGINS="github.com;wikipedia.org" pytest
 ```
 
-Unit tests only (description/instructions rewriting, arg passthrough) —
-they don't spin up Chromium or Docker. The Docker image was verified
+Unit tests only (description/instructions/schema rewriting, arg
+passthrough, per-user session pool) — they don't spin up Chromium or
+Docker. The Docker image was verified
 end-to-end manually: built, run, a real MCP client connected and listed
 tools (allowlist visible in both `initialize.instructions` and
 `browser_navigate`'s description), navigated successfully to an allowed

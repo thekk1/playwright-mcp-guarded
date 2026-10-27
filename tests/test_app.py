@@ -6,6 +6,11 @@ from mcp import types
 
 
 @pytest.fixture()
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture()
 def app_module(monkeypatch):
     monkeypatch.setenv(
         "ALLOWED_ORIGINS", "github.com;raw.githubusercontent.com;wikipedia.org"
@@ -42,6 +47,38 @@ def test_tool_without_url_param_is_untouched(app_module):
     assert annotated is tool
 
 
+def test_filename_param_removed_from_schema(app_module):
+    tool = types.Tool(
+        name="browser_snapshot",
+        description="Capture accessibility snapshot",
+        inputSchema={
+            "type": "object",
+            "properties": {"filename": {"type": "string"}, "depth": {"type": "number"}},
+            "required": ["filename"],
+        },
+    )
+    annotated = app_module._annotate_tool(tool)
+    assert "filename" not in annotated.inputSchema["properties"]
+    assert "depth" in annotated.inputSchema["properties"]
+    assert annotated.inputSchema["required"] == []
+    assert annotated.description == "Capture accessibility snapshot"
+    assert "filename" in tool.inputSchema["properties"]
+
+
+def test_filename_argument_stripped_from_calls(app_module):
+    assert app_module._strip_file_args({"filename": "x.md", "depth": 3}) == {"depth": 3}
+    assert app_module._strip_file_args(None) == {}
+
+
+def test_console_log_link_replaced_by_tool_name(app_module):
+    result = types.CallToolResult(content=[types.TextContent(
+        type="text",
+        text="### Events\n- New console entries: ../tmp/playwright-mcp-output/console-1.log#L1-L8",
+    )])
+    text = app_module._replace_file_links(result).content[0].text
+    assert text == "### Events\n- New console entries: browser_console_messages"
+
+
 def test_instructions_list_all_configured_domains(app_module):
     for domain in ("github.com", "raw.githubusercontent.com", "wikipedia.org"):
         assert domain in app_module._INSTRUCTIONS
@@ -63,7 +100,11 @@ def test_extra_instructions_appended_when_set(monkeypatch):
 
 
 def test_extra_instructions_absent_when_unset(app_module):
-    assert app_module._INSTRUCTIONS.count("\n\n") == 0
+    assert app_module._INSTRUCTIONS.endswith(app_module._SNAPSHOT_NOTE)
+
+
+def test_instructions_tell_model_to_fetch_content_with_snapshot(app_module):
+    assert "browser_snapshot" in app_module._INSTRUCTIONS
 
 
 def test_empty_allowlist_says_so_instead_of_silently_allowing(monkeypatch):
@@ -99,3 +140,49 @@ def test_spawn_args_pass_through_same_allowlist_used_for_visibility(app_module):
     idx = args.index("--allowed-origins")
     assert args[idx + 1] == "github.com;raw.githubusercontent.com;wikipedia.org"
     assert "--block-service-workers" in args
+    assert "--isolated" in args
+    assert args[args.index("--snapshot-mode") + 1] == "none"
+    assert args[args.index("--output-dir") + 1] == app_module._OUTPUT_DIR
+
+
+class _FakeSession:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        return name
+
+
+@pytest.mark.anyio
+async def test_pool_keeps_one_session_per_user_and_closes_idle(app_module, monkeypatch):
+    import anyio
+
+    opened = []
+
+    async def fake_run(self, key, slot):
+        slot.session = _FakeSession()
+        opened.append((key, slot))
+        slot.ready.set()
+        await slot.closed.wait()
+        if self._slots.get(key) is slot:
+            del self._slots[key]
+
+    monkeypatch.setattr(app_module._UpstreamPool, "_run", fake_run)
+    monkeypatch.setattr(app_module, "_SESSION_IDLE_SECONDS", 0.05)
+    async with anyio.create_task_group() as tg:
+        pool = app_module._UpstreamPool(tg)
+        await pool.call_tool("a", "browser_navigate", {})
+        await pool.call_tool("a", "browser_snapshot", {})
+        await pool.call_tool("b", "browser_navigate", {})
+        assert [k for k, _ in opened] == ["a", "b"]
+        assert len(opened[0][1].session.calls) == 2
+
+        await pool.call_tool("a", "browser_close", {})
+        await pool.call_tool("a", "browser_navigate", {})
+        assert [k for k, _ in opened] == ["a", "b", "a"]
+
+        tg.start_soon(pool.reap_idle)
+        await anyio.sleep(0.2)
+        assert pool._slots == {}
+        tg.cancel_scope.cancel()

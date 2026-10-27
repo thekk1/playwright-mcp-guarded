@@ -1,7 +1,7 @@
 [project]
 name = "playwright-mcp-guarded"
 version = "0.1.0"
-description = "Domain-guarded, non-user-bound wrapper around @playwright/mcp for LibreChat"
+description = "Domain-guarded, per-user isolated wrapper around @playwright/mcp for LibreChat"
 requires-python = ">=3.11"
 dependencies = [
   "mcp>=1.29,<2",
