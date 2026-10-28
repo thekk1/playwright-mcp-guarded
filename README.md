@@ -160,6 +160,18 @@ operating knowledge their specific allowlist needs, in their own words:
 -e EXTRA_INSTRUCTIONS="Search: http://searxng:8080/search?q=<term> (general), add &categories=science for Google Scholar results."
 ```
 
+`SEARCH_URL` (optional, URL prefix of a search engine's result pages, e.g.
+`http://searxng:8080/search`): `browser_read` appends a note to pages under
+it saying that search results are not a source, that facts and numbers come
+only from a page opened with `browser_read`, and that missing ones are named
+instead of filled in from training knowledge. Snippets hold fragments of
+figures; without the note, models completed them from memory and cited
+pages they never opened, despite the same rule in their system prompt.
+
+```
+-e SEARCH_URL=http://searxng:8080/search
+```
+
 No `MCP_API_KEY`, no auth gate on the MCP connection itself — deliberately:
 a 401 from any such gate makes LibreChat's non-OAuth MCP client try (and
 get stuck on) OAuth. Docker network isolation is the boundary. No

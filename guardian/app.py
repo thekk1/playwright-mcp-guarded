@@ -86,6 +86,18 @@ _DOMAIN_LIST_HUMAN = ", ".join(_ALLOWED_ORIGINS) if _ALLOWED_ORIGINS else "(kein
 # verbatim, so the deployer's wording is what the model sees.
 _EXTRA_INSTRUCTIONS = os.environ.get("EXTRA_INSTRUCTIONS", "").strip()
 
+# Search engine result pages (URL prefix, e.g. http://searxng:8080/search).
+# browser_read appends _SEARCH_NOTE to them: snippets hold fragments of
+# figures, and models filled the gaps from training knowledge and named a
+# source they never opened. The note sits right where that decision is made;
+# a rule in the system prompt alone did not stop it.
+_SEARCH_URL = os.environ.get("SEARCH_URL", "").strip()
+_SEARCH_NOTE = (
+    "This is a list of search results, not a source. Snippets are fragments: before using any "
+    "fact or number, open the page that states it with browser_read. If no page you read states "
+    "it, say so; never fill it in from training knowledge or name a source you did not read."
+)
+
 # Header that identifies the browser user, set by the MCP client per user
 # (LibreChat: `headers: {X-LibreChat-User: "{{LIBRECHAT_USER_ID}}"}`, which
 # also makes LibreChat open one MCP connection per user instead of one
@@ -298,6 +310,8 @@ def _format_read(page: dict[str, Any], status: str | None, offset: int) -> str:
     lines += [f"### Text (Zeichen {offset}-{end} von {total})", text[offset:end]]
     if end < total:
         lines += ["### Weiterlesen", f"browser_read ohne url mit offset={end} liefert den naechsten Abschnitt."]
+    if _SEARCH_URL and str(page.get("url", "")).startswith(_SEARCH_URL):
+        lines += ["### Search results", _SEARCH_NOTE]
     return "\n".join(lines)
 
 

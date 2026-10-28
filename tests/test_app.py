@@ -299,3 +299,23 @@ async def test_user_lock_is_per_user(app_module):
         pool = app_module._UpstreamPool(tg)
         assert pool.user_lock("a") is pool.user_lock("a")
         assert pool.user_lock("a") is not pool.user_lock("b")
+
+
+def test_browser_read_marks_search_results_as_no_source(monkeypatch):
+    monkeypatch.setenv("SEARCH_URL", "http://searxng:8080/search")
+    from guardian import app as module
+
+    importlib.reload(module)
+    try:
+        page = {"url": "http://searxng:8080/search?q=x", "title": "SearXNG", "text": "result"}
+        assert module._SEARCH_NOTE in module._format_read(page, None, 0)
+        article = {"url": "https://en.wikipedia.org/wiki/X", "title": "X", "text": "article"}
+        assert module._SEARCH_NOTE not in module._format_read(article, None, 0)
+    finally:
+        monkeypatch.delenv("SEARCH_URL", raising=False)
+        importlib.reload(module)
+
+
+def test_search_note_absent_when_unset(app_module):
+    page = {"url": "http://searxng:8080/search?q=x", "title": "SearXNG", "text": "result"}
+    assert "### Search results" not in app_module._format_read(page, None, 0)
