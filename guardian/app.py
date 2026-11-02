@@ -51,6 +51,7 @@ import os
 import re
 import subprocess
 from typing import Any
+from urllib.parse import urlsplit
 
 import anyio
 import anyio.abc
@@ -159,6 +160,17 @@ _INSTRUCTIONS = (
     + _USAGE_NOTE
     + (f"\n\n{_EXTRA_INSTRUCTIONS}" if _EXTRA_INSTRUCTIONS else "")
 )
+
+# Returned instead of navigating to a URL the allowlist blocks, and appended
+# to upstream's bare net::ERR_BLOCKED_BY_CLIENT (a redirect off the list).
+# Models ignored the list in the tool descriptions and tried one blocked
+# host after another; the refusal itself is the place they act on.
+_BLOCKED_NOTE = (
+    f"Nicht freigegeben. Erreichbar sind nur: {_DOMAIN_LIST_HUMAN}. Andere Domains, auch "
+    "Subdomains der freigegebenen, nicht versuchen: die Information auf einer freigegebenen "
+    "Domain suchen oder sagen, dass die Quelle nicht erreichbar ist."
+)
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 # The full instructions, not just the domain list: a client that connects
 # per user may never show `initialize` instructions to the model. LibreChat
@@ -350,6 +362,50 @@ def _annotate_tool(tool: types.Tool) -> types.Tool:
     return tool.model_copy(update=update) if update else tool
 
 
+def _blocked_host(url: Any) -> str | None:
+    """Host of ``url`` when the allowlist blocks it, else None.
+
+    Mirrors upstream's originOrHostGlob: an entry with a scheme is an origin
+    (``https://host:*`` for any port), any other entry is host[:port]; both
+    compare exactly, without subdomains. Non-http(s) URLs are left to
+    upstream.
+    """
+    if not _ALLOWED_ORIGINS or not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url.strip())
+        host = (parts.hostname or "").lower()
+        port = parts.port
+    except ValueError:
+        return None
+    if parts.scheme not in _DEFAULT_PORTS or not host:
+        return None
+    if port == _DEFAULT_PORTS[parts.scheme]:
+        port = None
+    netloc = f"{host}:{port}" if port else host
+    for entry in (e.lower().rstrip("/") for e in _ALLOWED_ORIGINS):
+        if "://" not in entry:
+            if entry == netloc:
+                return None
+        elif entry.endswith(":*"):
+            if entry[:-2] == f"{parts.scheme}://{host}":
+                return None
+        elif entry == f"{parts.scheme}://{netloc}":
+            return None
+    return netloc
+
+
+def _explain_block(result: types.CallToolResult) -> types.CallToolResult:
+    if not result.isError or not any(
+        isinstance(c, types.TextContent) and "ERR_BLOCKED_BY_CLIENT" in c.text for c in result.content
+    ):
+        return result
+    note = types.TextContent(
+        type="text", text=f"Blockiert durch die Domain-Freigabeliste (auch nach einer Weiterleitung). {_BLOCKED_NOTE}"
+    )
+    return result.model_copy(update={"content": [*result.content, note]})
+
+
 def _strip_file_args(arguments: dict[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in (arguments or {}).items() if k not in _FILE_ARGS}
 
@@ -500,12 +556,19 @@ def build_server(tools: list[types.Tool], pool: _UpstreamPool) -> Server:
                 content=[types.TextContent(type="text", text=f"Werkzeug {name} ist gesperrt.")],
                 isError=True,
             )
+        host = _blocked_host((arguments or {}).get("url"))
+        if host:
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=f"Domain {host}: {_BLOCKED_NOTE}")],
+                isError=True,
+            )
         key = _session_key(server)
         async with pool.user_lock(key):
             if name == _READ_TOOL.name:
-                return await _read_page(pool, key, arguments or {})
-            result = await pool.call_tool(key, name, _strip_file_args(arguments))
-        return _replace_file_links(result)
+                result = await _read_page(pool, key, arguments or {})
+            else:
+                result = _replace_file_links(await pool.call_tool(key, name, _strip_file_args(arguments)))
+        return _explain_block(result)
 
     return server
 

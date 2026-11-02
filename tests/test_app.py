@@ -319,3 +319,55 @@ def test_browser_read_marks_search_results_as_no_source(monkeypatch):
 def test_search_note_absent_when_unset(app_module):
     page = {"url": "http://searxng:8080/search?q=x", "title": "SearXNG", "text": "result"}
     assert "### Search results" not in app_module._format_read(page, None, 0)
+
+
+def test_blocked_host_follows_upstream_matching(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "searxng:8080;github.com;https://docs.example.org:*")
+    from guardian import app as module
+
+    importlib.reload(module)
+    try:
+        assert module._blocked_host("https://github.com/a/b") is None
+        assert module._blocked_host("http://GitHub.com:80/") is None
+        assert module._blocked_host("http://searxng:8080/search?q=x") is None
+        assert module._blocked_host("https://docs.example.org:8443/x") is None
+        assert module._blocked_host("https://api.github.com/x") == "api.github.com"
+        assert module._blocked_host("http://searxng/search") == "searxng"
+        assert module._blocked_host("http://docs.example.org/x") == "docs.example.org"
+        assert module._blocked_host("about:blank") is None
+        assert module._blocked_host(None) is None
+    finally:
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        importlib.reload(module)
+
+
+def test_blocked_url_refused_before_reaching_upstream(app_module):
+    import anyio
+
+    class _NoPool:
+        def user_lock(self, key):
+            raise AssertionError("blocked url reached upstream")
+
+    server = app_module.build_server([], _NoPool())
+
+    async def run():
+        called = await server.request_handlers[types.CallToolRequest](
+            types.CallToolRequest(
+                method="tools/call",
+                params=types.CallToolRequestParams(name="browser_read", arguments={"url": "https://nvd.nist.gov/x"}),
+            )
+        )
+        return called.root
+
+    called = anyio.run(run)
+    assert called.isError
+    text = called.content[0].text
+    assert text.startswith("Domain nvd.nist.gov: Nicht freigegeben.")
+    assert "github.com" in text
+
+
+def test_upstream_block_error_gets_allowlist_note(app_module):
+    out = app_module._explain_block(_result("### Error\nnet::ERR_BLOCKED_BY_CLIENT", is_error=True))
+    assert "Domain-Freigabeliste" in out.content[-1].text
+    ok = _result("fine")
+    assert app_module._explain_block(ok) is ok
