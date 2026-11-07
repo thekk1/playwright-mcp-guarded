@@ -130,7 +130,18 @@ Text the reader does not see is left out as well: elements with opacity 0,
 a font size under 2px, clipped to one pixel (`sr-only`), or placed above or
 left of the page. A page served behind Cloudflare's bot check ("Just a
 moment...", 403) is read again every 3 s, up to 5 times; the check solves
-itself in the browser (stackoverflow.com: under 5 s).
+itself in the browser.
+
+Stack Overflow questions (`/questions/<id>`, `/q/<id>`, `/a/<id>`) come from
+the Stack Exchange API instead of the browser, when `api.stackexchange.com` is
+in `ALLOWED_ORIGINS`. stackoverflow.com rate-limits browsers per IP: after
+about three question pages in a minute it answers 429 with the Cloudflare page,
+also with 20 or 45 s between page loads, and stays blocked for minutes while
+requests keep coming. The API returns question and answers (by votes) as text,
+code blocks fenced, within a daily quota per IP: 300 requests without an app key,
+10,000 with one (`STACKEXCHANGE_KEY`). A question costs two requests, a link to an
+answer three; pages are cached for 10 minutes. When the API gives no answer,
+`browser_read` falls back to the browser.
 
 ### Web content is fenced
 
@@ -157,6 +168,35 @@ The fence lowers the chance that the model follows text on a page; it does
 not rule it out. The calling agent needs rules of its own for content
 between the markers, and the allowlist and blocked tools stay what limits
 the damage.
+
+### Web content is checked
+
+With `CHECK_URL` set, every result with page content is checked by a
+language model before it is passed on (`guardian/screen.py`): does the text
+contain instructions addressed to an AI, assistant or agent that try to steer
+it -- open a URL, run a search, call a tool, change its rules, hide something
+from the user, pass on data? Text that only describes or quotes such attacks
+(an article on prompt injection, a prompt collection, documentation) is not
+an attempt.
+
+- Found: the content is withheld; the model gets a note with the URL instead,
+  the quote goes to the log only.
+- No usable answer from the check model (after one retry): the content is
+  withheld as well. The check fails closed -- a page that cannot be checked is
+  not passed on unchecked.
+- `browser_read` checks the section it returns plus the page title; upstream
+  results are checked whole. Text over 30000 characters is checked in pieces of
+  that size, up to `CHECK_PARALLEL` (4) at once. Results are cached by content
+  hash. Screenshots are not checked.
+
+| Variable | Default | |
+| --- | --- | --- |
+| `CHECK_URL` | empty (check off) | OpenAI-compatible chat completions endpoint |
+| `CHECK_API_KEY` | empty | sent as `Authorization: Bearer` |
+| `CHECK_MODEL` | `qwen3.8` | |
+| `CHECK_THINKING` | `low` | `off` sends `chat_template_kwargs.enable_thinking: false`, anything else `reasoning_effort` |
+| `CHECK_TIMEOUT` | `120` | seconds per request |
+| `CHECK_PARALLEL` | `4` | requests at once |
 
 ### Blocked tools
 
@@ -206,9 +246,9 @@ pages they never opened, despite the same rule in their system prompt.
 
 No `MCP_API_KEY`, no auth gate on the MCP connection itself — deliberately:
 a 401 from any such gate makes LibreChat's non-OAuth MCP client try (and
-get stuck on) OAuth. Docker network isolation is the boundary. No
-credentials of any kind pass through this server; it only ever reads
-public pages.
+get stuck on) OAuth. Docker network isolation is the boundary. No user
+credentials pass through this server; it only ever reads public pages. The
+only secret it holds is `CHECK_API_KEY` for the check model.
 
 **Accepted trade-off, not an oversight:** this keeps enforcement at the
 Playwright application layer (now with `--block-service-workers`), not an
