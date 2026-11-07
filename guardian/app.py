@@ -238,7 +238,10 @@ _READ_CHUNK = 30000
 # don't -- Wikipedia articles have hundreds of internal links that would
 # bury the text. All changes are undone before returning.
 _READ_FUNCTION = """() => {
-  const root = document.querySelector('main, [role=main], article') || document.body;
+  // main first: a selector list returns the first match in document order,
+  // and learn.microsoft.com has small <article> cards before its <main>.
+  const root = document.querySelector('main') || document.querySelector('[role=main]')
+    || document.querySelector('article') || document.body;
   const hidden = [];
   for (const el of root.querySelectorAll('nav, aside, form, select, script, style, noscript, [role=navigation], [role=search], [role=banner], [role=contentinfo], [role=complementary], [aria-hidden=true]')) {
     hidden.push([el, el.style.cssText]);

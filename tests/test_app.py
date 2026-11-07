@@ -671,3 +671,8 @@ def test_browser_read_waits_for_anubis_check(app_module, monkeypatch):
 
     out = anyio.run(app_module._read_page, _Pool({}), "k", {"url": "https://wiki.documentfoundation.org/X"})
     assert "Dokumentation" in out.content[0].text and "Handbuch" in out.content[0].text
+
+
+def test_read_function_prefers_main_over_earlier_articles(app_module):
+    f = app_module._READ_FUNCTION
+    assert f.index("querySelector('main')") < f.index("querySelector('[role=main]')") < f.index("querySelector('article')")
