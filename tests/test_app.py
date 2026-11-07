@@ -446,7 +446,7 @@ def test_browser_read_waits_for_cloudflare_check(app_module, monkeypatch):
     import json
 
     monkeypatch.setattr(app_module, "_CHALLENGE_WAIT", 0)
-    pages = iter([{"url": "u", "title": app_module._CHALLENGE_TITLE, "text": ""},
+    pages = iter([{"url": "u", "title": "Just a moment...", "text": ""},
                   {"url": "u", "title": "Question - Stack Overflow", "text": "answer"}])
 
     class _Pool(_ScriptedPool):
@@ -652,3 +652,22 @@ def test_stack_overflow_uses_the_browser_without_api_in_allowlist(app_module, mo
     pool = _page_pool(page)
     anyio.run(app_module._read_page, pool, "k", {"url": "https://stackoverflow.com/questions/5"})
     assert [c[1] for c in pool.calls] == ["browser_navigate", "browser_evaluate"]
+
+
+def test_browser_read_waits_for_anubis_check(app_module, monkeypatch):
+    import anyio
+    import json
+
+    monkeypatch.setattr(app_module, "_CHALLENGE_WAIT", 0)
+    pages = iter([{"url": "u", "title": "Making sure you're not a bot!", "text": ""},
+                  {"url": "u", "title": "Dokumentation", "text": "Handbuch"}])
+
+    class _Pool(_ScriptedPool):
+        async def call_tool(self, key, name, arguments):
+            self.calls.append((key, name, arguments))
+            if name == "browser_evaluate":
+                return _result("### Result\n" + json.dumps(next(pages)))
+            return _result("### Page\n- Page URL: u")
+
+    out = anyio.run(app_module._read_page, _Pool({}), "k", {"url": "https://wiki.documentfoundation.org/X"})
+    assert "Dokumentation" in out.content[0].text and "Handbuch" in out.content[0].text

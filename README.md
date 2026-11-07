@@ -128,9 +128,9 @@ fragments with `browser_find` instead of reading the page.
 
 Text the reader does not see is left out as well: elements with opacity 0,
 a font size under 2px, clipped to one pixel (`sr-only`), or placed above or
-left of the page. A page served behind Cloudflare's bot check ("Just a
-moment...", 403) is read again every 3 s, up to 5 times; the check solves
-itself in the browser.
+left of the page. A page served behind a bot check that solves itself in the
+browser -- Cloudflare ("Just a moment...", 403) or Anubis ("Making sure you're
+not a bot!") -- is read again every 3 s, up to 5 times.
 
 Stack Overflow questions (`/questions/<id>`, `/q/<id>`, `/a/<id>`) come from
 the Stack Exchange API instead of the browser, when `api.stackexchange.com` is

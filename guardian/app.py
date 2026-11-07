@@ -425,11 +425,12 @@ def _fence_result(result: types.CallToolResult) -> types.CallToolResult:
     return result.model_copy(update={"content": content})
 
 
-# Cloudflare's bot check answers 403 with this title and a script that
-# solves itself in a real browser within a few seconds, then reloads the
-# page (stackoverflow.com: under 5 s). browser_read waits for it instead of
-# returning the empty check page.
-_CHALLENGE_TITLE = "Just a moment..."
+# Bot checks that solve themselves in a real browser within a few seconds and
+# then reload the page: Cloudflare (403, "Just a moment...") and Anubis
+# (proof of work, "Making sure you're not a bot!", wiki.documentfoundation.org:
+# about 4 s). browser_read waits for them instead of returning the empty check
+# page.
+_CHALLENGE_TITLES = frozenset({"Just a moment...", "Making sure you're not a bot!"})
 _CHALLENGE_WAIT = 3.0
 _CHALLENGE_TRIES = 5
 
@@ -512,10 +513,10 @@ async def _read_page(pool: "_UpstreamPool", key: str, arguments: dict[str, Any])
         if ev.isError or raw is None:
             return await _screen_result(_replace_file_links(ev), arguments)
         page = json.loads(raw)
-        if page.get("title") != _CHALLENGE_TITLE or attempt == _CHALLENGE_TRIES:
+        if page.get("title") not in _CHALLENGE_TITLES or attempt == _CHALLENGE_TRIES:
             break
         await anyio.sleep(_CHALLENGE_WAIT)
-    if attempt and page.get("title") != _CHALLENGE_TITLE:
+    if attempt and page.get("title") not in _CHALLENGE_TITLES:
         status = None  # the 403 belonged to the check page, not to this one
     return await _checked_read(page, status, offset)
 
