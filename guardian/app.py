@@ -163,6 +163,11 @@ _INSTRUCTIONS = (
     "Dieser Browser-MCP kann ausschliesslich folgende Domains erreichen "
     f"(serverseitig erzwungen, alles andere schlaegt fehl): {_DOMAIN_LIST_HUMAN}. "
     "Plane Aufrufe entsprechend, statt andere Domains zu versuchen."
+    + (
+        " Ein Eintrag *.<domain> gilt fuer jede Subdomain von <domain>, nicht fuer <domain> selbst."
+        if any(o.startswith("*.") for o in _ALLOWED_ORIGINS)
+        else ""
+    )
     + _USAGE_NOTE
     + (f"\n\n{_EXTRA_INSTRUCTIONS}" if _EXTRA_INSTRUCTIONS else "")
 )
@@ -173,8 +178,9 @@ _INSTRUCTIONS = (
 # host after another; the refusal itself is the place they act on.
 _BLOCKED_NOTE = (
     f"Nicht freigegeben. Erreichbar sind nur: {_DOMAIN_LIST_HUMAN}. Andere Domains, auch "
-    "Subdomains der freigegebenen, nicht versuchen: die Information auf einer freigegebenen "
-    "Domain suchen oder sagen, dass die Quelle nicht erreichbar ist."
+    "Subdomains der freigegebenen (ausser bei einem Eintrag *.<domain>), nicht versuchen: die "
+    "Information auf einer freigegebenen Domain suchen oder sagen, dass die Quelle nicht "
+    "erreichbar ist."
 )
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
@@ -546,8 +552,10 @@ def _blocked_host(url: Any) -> str | None:
 
     Mirrors upstream's originOrHostGlob: an entry with a scheme is an origin
     (``https://host:*`` for any port), any other entry is host[:port]; both
-    compare exactly, without subdomains. Non-http(s) URLs are left to
-    upstream.
+    compare exactly, without subdomains. A host entry ``*.example.org``
+    becomes upstream's glob ``*://*.example.org/**``, where ``*`` matches
+    anything but ``/``: every host ending in ``.example.org`` on its default
+    port, not ``example.org`` itself. Non-http(s) URLs are left to upstream.
     """
     if not _ALLOWED_ORIGINS or not isinstance(url, str):
         return None
@@ -565,6 +573,8 @@ def _blocked_host(url: Any) -> str | None:
     for entry in (e.lower().rstrip("/") for e in _ALLOWED_ORIGINS):
         if "://" not in entry:
             if entry == netloc:
+                return None
+            if entry.startswith("*.") and port is None and host.endswith(entry[1:]):
                 return None
         elif entry.endswith(":*"):
             if entry[:-2] == f"{parts.scheme}://{host}":

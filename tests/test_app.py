@@ -342,6 +342,34 @@ def test_blocked_host_follows_upstream_matching(monkeypatch):
         importlib.reload(module)
 
 
+def test_blocked_host_subdomain_wildcard(monkeypatch):
+    monkeypatch.setenv("ALLOWED_ORIGINS", "example.org;*.example.org")
+    from guardian import app as module
+
+    importlib.reload(module)
+    try:
+        assert module._blocked_host("https://example.org/") is None
+        assert module._blocked_host("https://www.example.org/a") is None
+        assert module._blocked_host("https://a.b.EXAMPLE.org/") is None
+        assert module._blocked_host("http://www.example.org:80/") is None
+        assert module._blocked_host("https://www.example.org:8443/") == "www.example.org:8443"
+        assert module._blocked_host("https://example.org.evil.net/") == "example.org.evil.net"
+        assert module._blocked_host("https://badexample.org/") == "badexample.org"
+        assert module._blocked_host("https://www.example.org@evil.net/") == "evil.net"
+        assert "*.<domain> gilt fuer jede Subdomain" in module._INSTRUCTIONS
+    finally:
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        importlib.reload(module)
+
+    monkeypatch.setenv("ALLOWED_ORIGINS", "*.example.org")
+    importlib.reload(module)
+    try:
+        assert module._blocked_host("https://example.org/") == "example.org"
+    finally:
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        importlib.reload(module)
+
+
 def test_blocked_url_refused_before_reaching_upstream(app_module):
     import anyio
 

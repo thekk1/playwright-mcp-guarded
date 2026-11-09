@@ -219,6 +219,11 @@ docker run --rm -p 8080:8080 \
 `ALLOWED_ORIGINS` is semicolon-separated — same format `@playwright/mcp`
 itself uses for `PLAYWRIGHT_MCP_ALLOWED_ORIGINS`. An empty value blocks
 every domain (logged as a warning at startup, not a silent bypass).
+An entry `*.example.org` allows every subdomain of `example.org` on its
+default port, but not `example.org` itself; list that separately. Upstream
+turns the entry into the glob `*://*.example.org/**`, whose `*` stops at `/`,
+so `example.org.other.net` does not match. Use it only for domains whose
+subdomains are all public and trusted.
 
 `EXTRA_INSTRUCTIONS` (optional, free text) is appended verbatim to the
 `initialize` `instructions` the model sees, and with them to the
